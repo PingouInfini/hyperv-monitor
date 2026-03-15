@@ -76,19 +76,22 @@ $vms = Get-VM | ForEach-Object {
 
     # Récupération du hostname invité via KVP Exchange
     $vmHostName = $null
+    $vmDomain = $null
+    $vmDns = @()
     try {
-        $kvp = Get-VMIntegrationService -VMName $safeName -Name "Key-Value Pair Exchange"
+        $kvp = Get-VMIntegrationService -VMName $safeName -Name "Échange de paires clé-valeur"
         if ($kvp.Enabled) {
             $kvpItems = Get-VMKeyValuePair -VMName $safeName -Source Guest
             $vmHostName = ($kvpItems | Where-Object { $_.Name -eq "HostName" }).Value
+            $vmDomain   = ($kvpItems | Where-Object { $_.Name -eq "DomainName" -or $_.Name -eq "FullyQualifiedDomainName" }).Value
+            $vmDns      = ($kvpItems | Where-Object { $_.Name -eq "NameServer" }).Value -split ','
         }
-    } catch { $vmHostName = $null }
+    } catch { }
 
     if (-not $vmHostName -and $ip) {
         try {
-            # Fallback: reverse DNS sur l'adresse IP
             $vmHostName = [System.Net.Dns]::GetHostEntry($ip).HostName
-        } catch { $vmHostName = $null }
+        } catch { }
     }
 
     $vhdInfo = @()
@@ -109,6 +112,8 @@ $vms = Get-VM | ForEach-Object {
     [pscustomobject]@{
         name = $vm.Name
         vm_hostname = $vmHostName
+        vm_domain   = $vmDomain
+        dns_servers = $vmDns
         ip = $ip
         ram_mb = [int]($vm.MemoryStartup / 1MB)
         total_vhd_gb = $totalVhdGB
