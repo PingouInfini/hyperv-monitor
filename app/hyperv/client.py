@@ -41,95 +41,34 @@ class HyperVClient:
         return json.loads(text) if text else {}
 
     def collect(self) -> Dict[str, Any]:
-        # PowerShell script executed remotely; returns a JSON document
+        # PowerShell script minifié SANS accents pour éviter les erreurs d'encodage WinRM
         ps = r'''
-$ProgressPreference = 'SilentlyContinue'
-
-# Host name
-$hostName = (Get-ComputerInfo -Property CsName).CsName
-
-# Host IP
-$hostIP = (Get-NetIPAddress -AddressFamily IPv4 |
-    Where-Object { $_.IPAddress -notlike '169.*' -and $_.IPAddress -notlike '127.*' } |
-    Select-Object -First 1 -ExpandProperty IPAddress)
-
-# Free memory (MB)
-$os = Get-CimInstance Win32_OperatingSystem
-$freeMemMB = [int]($os.FreePhysicalMemory / 1024)
-
-# Free disk (GB) - sum of fixed drives
-$fixed = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | Select-Object DeviceID, FreeSpace, Size
-$freeDiskGB = [math]::Round((($fixed | Measure-Object -Property FreeSpace -Sum).Sum) / 1GB, 2)
-
-# VMs
-$vms = Get-VM | ForEach-Object {
-    $vm = $_
-
-    # On remplace [ et ] par * uniquement pour les commandes Hyper-V
-    $safeName = $vm.Name -replace '\[','*' -replace '\]','*'
-
-    $ip = $null
-    try {
-        $adp = Get-VMNetworkAdapter -VMName $safeName
-        $ip = $adp.IPAddresses | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.*' } | Select-Object -First 1
-    } catch { $ip = $null }
-
-    # Récupération du hostname invité via KVP Exchange
-    $vmHostName = $null
-    $vmDomain = $null
-    $vmDns = @()
-    try {
-        $kvp = Get-VMIntegrationService -VMName $safeName -Name "Échange de paires clé-valeur"
-        if ($kvp.Enabled) {
-            $kvpItems = Get-VMKeyValuePair -VMName $safeName -Source Guest
-            $vmHostName = ($kvpItems | Where-Object { $_.Name -eq "HostName" }).Value
-            $vmDomain   = ($kvpItems | Where-Object { $_.Name -eq "DomainName" -or $_.Name -eq "FullyQualifiedDomainName" }).Value
-            $vmDns      = ($kvpItems | Where-Object { $_.Name -eq "NameServer" }).Value -split ','
-        }
-    } catch { }
-
-    if (-not $vmHostName -and $ip) {
-        try {
-            $vmHostName = [System.Net.Dns]::GetHostEntry($ip).HostName
-        } catch { }
-    }
-
-    $vhdInfo = @()
-    try {
-        $vhdInfo = Get-VMHardDiskDrive -VMName $safeName | ForEach-Object {
-            $vhd = Get-VHD -Path $_.Path
-            [pscustomobject]@{
-                Path = $vhd.Path
-                SizeBytes = [int64]$vhd.Size
-                FileSizeBytes = [int64]$vhd.FileSize
-            }
-        }
-    } catch { $vhdInfo = @() }
-
-    $totalVhdGB = if ($vhdInfo) { [math]::Round((($vhdInfo | Measure-Object -Property SizeBytes -Sum).Sum) / 1GB, 2) } else { $null }
-    $totalVhdFileGB = if ($vhdInfo) { [math]::Round((($vhdInfo | Measure-Object -Property FileSizeBytes -Sum).Sum) / 1GB, 2) } else { $null }
-
-    [pscustomobject]@{
-        name = $vm.Name
-        vm_hostname = $vmHostName
-        vm_domain   = $vmDomain
-        dns_servers = $vmDns
-        ip = $ip
-        ram_mb = [int]($vm.MemoryStartup / 1MB)
-        total_vhd_gb = $totalVhdGB
-        total_vhd_file_gb = $totalVhdFileGB
-    }
+$ProgressPreference='SilentlyContinue'
+$hostName=(Get-ComputerInfo -Property CsName).CsName
+$hostIP=(Get-NetIPAddress -AddressFamily IPv4|?{$_.IPAddress -notlike '169.*' -and $_.IPAddress -notlike '127.*'}|Select -First 1 -ExpandProperty IPAddress)
+$cpu=Get-CimInstance Win32_Processor|Measure -Property LoadPercentage -Average
+$cpuUsage=if($cpu.Average){[int]$cpu.Average}else{0}
+$os=Get-CimInstance Win32_OperatingSystem
+$freeMemMB=[int]($os.FreePhysicalMemory/1024)
+$totalMemMB=[int]($os.TotalVisibleMemorySize/1024)
+$fixed=Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"|Select DeviceID,FreeSpace,Size
+$freeDiskGB=[math]::Round((($fixed|Measure -Property FreeSpace -Sum).Sum)/1GB,2)
+$totalDiskGB=[math]::Round((($fixed|Measure -Property Size -Sum).Sum)/1GB,2)
+$vms=Get-VM|%{
+ $vm=$_
+ $safeName=$vm.Name -replace '\[','*' -replace '\]','*'
+ $ip=$null
+ try{$adp=Get-VMNetworkAdapter -VMName $safeName;$ip=$adp.IPAddresses|?{$_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.*'}|Select -First 1}catch{}
+ $vmHost=$null;$vmDom=$null;$vmDns=@()
+ try{$kvp=Get-VMIntegrationService -VMName $safeName|?{$_.Name -match 'Key-Value|change de paires'};if($kvp -and $kvp.Enabled){$items=Get-VMKeyValuePair -VMName $safeName -Source Guest;$vmHost=($items|?{$_.Name -eq "HostName"}).Value;$vmDom=($items|?{$_.Name -eq "DomainName" -or $_.Name -eq "FullyQualifiedDomainName"}).Value;$vmDns=($items|?{$_.Name -eq "NameServer"}).Value -split ','}}catch{}
+ if(-not $vmHost -and $ip){try{$vmHost=[System.Net.Dns]::GetHostEntry($ip).HostName}catch{}}
+ $vhdInfo=@()
+ try{$vhdInfo=Get-VMHardDiskDrive -VMName $safeName|%{ $vhd=Get-VHD -Path $_.Path;[pscustomobject]@{Path=$vhd.Path;Size=[int64]$vhd.Size;FileSize=[int64]$vhd.FileSize}}}catch{}
+ $totVhd=if($vhdInfo){[math]::Round((($vhdInfo|Measure -Property Size -Sum).Sum)/1GB,2)}else{$null}
+ $totVhdFile=if($vhdInfo){[math]::Round((($vhdInfo|Measure -Property FileSize -Sum).Sum)/1GB,2)}else{$null}
+ [pscustomobject]@{name=$vm.Name;state=$vm.State.ToString();vm_hostname=$vmHost;vm_domain=$vmDom;dns_servers=$vmDns;ip=$ip;ram_mb=[int]($vm.MemoryStartup/1MB);total_vhd_gb=$totVhd;total_vhd_file_gb=$totVhdFile}
 }
-
-$result = [pscustomobject]@{
-    host_name = $hostName
-    host_ip = $hostIP
-    host_free_mem_mb = $freeMemMB
-    host_free_disk_gb = $freeDiskGB
-    vms = $vms
-}
-
-$result | ConvertTo-Json -Depth 6
+[pscustomobject]@{host_name=$hostName;host_ip=$hostIP;host_cpu_pct=$cpuUsage;host_free_mem_mb=$freeMemMB;host_total_mem_mb=$totalMemMB;host_free_disk_gb=$freeDiskGB;host_total_disk_gb=$totalDiskGB;vms=$vms}|ConvertTo-Json -Depth 6
 '''
         return self._run_ps_json(ps)
 

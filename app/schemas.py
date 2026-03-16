@@ -12,6 +12,7 @@ class VMBase(BaseModel):
     total_vhd_gb: Optional[float] = None
     total_vhd_file_gb: Optional[float] = None
     last_seen: Optional[datetime] = None
+    state: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -23,6 +24,9 @@ class HostBase(BaseModel):
     free_disk_gb: Optional[float] = None
     free_mem_mb: Optional[int] = None
     last_seen: Optional[datetime] = None
+    cpu_usage_pct: Optional[int] = None
+    total_disk_gb: Optional[float] = None
+    total_mem_mb: Optional[int] = None
 
     class Config:
         from_attributes = True

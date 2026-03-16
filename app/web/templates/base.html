@@ -11,20 +11,22 @@
   <script src="/static/vendor/htmx.min.js"></script>
 </head>
 <body>
-<main class="container">
-  <header class="app-header">
+<main class="container-fluid"> <header class="app-header">
+  <div class="header-left">
     <div class="brand">
       <div class="logo-dot"></div>
       <h1>Hyper‑V Monitor</h1>
     </div>
-    <nav>
-      <ul>
-        <li><a href="#" id="tab-hosts" class="tab active" data-target="pane-hosts">Vue Hosts</a></li>
-        <li><a href="#" id="tab-vms" class="tab" data-target="pane-vms">Toutes les VMs</a></li>
-        <li><button id="refresh-btn" class="contrast outline">↻ Actualiser</button></li>
-      </ul>
+    <nav class="tabs-nav">
+      <a href="#" id="tab-hosts" class="tab active" data-target="pane-hosts">Vue Hosts</a>
+      <a href="#" id="tab-vms" class="tab" data-target="pane-vms">Toutes les VMs</a>
     </nav>
-  </header>
+  </div>
+  <div class="header-right">
+    <input type="search" id="global-search" placeholder="Rechercher (Host ou VM)...">
+    <button id="refresh-btn" class="contrast outline btn-icon">↻ Actualiser</button>
+  </div>
+</header>
 
   <section id="pane-hosts" class="pane active">
     {% block tab_hosts %}{% endblock %}
@@ -34,6 +36,24 @@
     {% block tab_vms %}{% endblock %}
   </section>
 </main>
+
+<dialog id="delete-modal">
+  <article>
+    <header>
+      <a href="#close" aria-label="Close" class="close" data-target="delete-modal"></a>
+      ⚠️ Supprimer l'hôte
+    </header>
+    <p>Vous êtes sur le point de supprimer l'hôte et toutes ses VMs de la base de données.</p>
+    <p>Pour confirmer, veuillez saisir l'IP de l'hôte : <strong id="delete-target-ip-display" class="text-danger"></strong></p>
+    <input type="text" id="delete-confirm-input" placeholder="Saisir l'IP ici..." autocomplete="off">
+    <input type="hidden" id="delete-host-id">
+    <input type="hidden" id="delete-target-ip">
+    <footer>
+      <button class="secondary outline" data-target="delete-modal" onclick="closeModal()">Annuler</button>
+      <button id="confirm-delete-btn" class="danger" disabled>Supprimer définitivement</button>
+    </footer>
+  </article>
+</dialog>
 
 <script src="/static/vendor/dataTables.min.js"></script>
 <script src="/static/app.js"></script>

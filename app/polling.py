@@ -60,6 +60,9 @@ def collect_once_sync(hosts: List[str] | None = None):
                 ip=data.get("host_ip"),
                 free_disk_gb=data.get("host_free_disk_gb"),
                 free_mem_mb=data.get("host_free_mem_mb"),
+                cpu_usage_pct=data.get("host_cpu_pct"),
+                total_disk_gb=data.get("host_total_disk_gb"),
+                total_mem_mb=data.get("host_total_mem_mb"),
             )
             vms = data.get("vms", [])
             seen_names = set()
@@ -84,6 +87,7 @@ def collect_once_sync(hosts: List[str] | None = None):
                         ram_mb=vm.get("ram_mb"),
                         total_vhd_gb=vm.get("total_vhd_gb"),
                         total_vhd_file_gb=vm.get("total_vhd_file_gb"),
+                        state=vm.get("state"),
                     )
 
             # --- suppression des VMs disparues ---
