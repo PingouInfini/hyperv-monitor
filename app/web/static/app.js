@@ -43,11 +43,17 @@ async function loadVMs() {
     const isUp = vm.state === 'Running';
     const statusHtml = `<span class="status-dot ${isUp ? 'up' : 'down'}" title="${vm.state}"></span>`;
 
+    // IP en italique si éteinte, ou un tiret si on ne l'a jamais eue
+    let displayIp = '<span class="text-muted">—</span>';
+    if (vm.ip) {
+        displayIp = isUp ? vm.ip : `<i class="text-muted">${vm.ip}</i>`;
+    }
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${statusHtml} &nbsp; ${vm.name}</td>
       <td>${vm.guest_hostname || '<span class="text-muted">—</span>'}</td>
-      <td>${vm.ip || '<span class="text-muted">—</span>'}</td>
+      <td>${displayIp}</td>
       <td>${vm.ram_mb ? vm.ram_mb : '—'}</td>
       <td>${vm.total_vhd_gb ? vm.total_vhd_gb : '—'}</td>
       <td>${vm.total_vhd_file_gb ? vm.total_vhd_file_gb : '—'}</td>
@@ -66,11 +72,12 @@ async function loadVMs() {
   });
 
   if (window._dt) window._dt.destroy();
-  // Configuration 100 lignes par page, dom caché pour la recherche native
+  // Utilisation de "dom" pour masquer "l" (length/afficher) et "f" (filter/recherche)
   window._dt = new DataTable('#vms-table', {
     responsive: true,
     pageLength: 100,
-    language: { lengthMenu: "Afficher _MENU_ VMs par page", info: "_START_ à _END_ sur _TOTAL_ VMs", infoEmpty: "Aucune VM" }
+    dom: 't<"dt-bottom"ip>',
+    language: { info: "_START_ à _END_ sur _TOTAL_ VMs", infoEmpty: "Aucune VM" }
   });
 }
 
@@ -89,13 +96,16 @@ async function loadHosts() {
 
     const vmsHtml = vms.map(vm => {
       const isUp = vm.state === 'Running';
+      let displayIp = vm.ip || vm.state;
+      if (!isUp && vm.ip) displayIp = `<i>${vm.ip}</i>`;
+
       return `
-        <div class="vm-row" data-vm-name="${vm.name.toLowerCase()}">
+        <div class="vm-row" data-vm-name="${vm.name.toLowerCase()}" data-vm-ip="${(vm.ip || '').toLowerCase()}">
           <div class="vm-info">
             <span class="status-dot ${isUp ? 'up' : 'down'}"></span>
             <span class="vm-name">${vm.name}</span>
           </div>
-          <span class="vm-ip">${vm.ip || vm.state}</span>
+          <span class="vm-ip">${displayIp}</span>
         </div>
       `;
     }).join('');
@@ -138,7 +148,8 @@ async function loadHosts() {
           <div class="progress-bg"><div class="progress-fill ${getProgressColor(cpuPct)}" style="width: ${cpuPct}%"></div></div>
         </div>
         <div class="stat-item">
-          <div class="stat-header"><span>RAM</span><span class="stat-val">${memStr}</span></div>
+          <div class="stat-header"><span>RAM</span></div>
+          <div class="stat-header"><span class="stat-val">${memStr}</span></div>
           <div class="progress-bg"><div class="progress-fill ${getProgressColor(memPct)}" style="width: ${memPct}%"></div></div>
         </div>
         <div class="stat-item">
@@ -190,6 +201,11 @@ document.getElementById('global-search').addEventListener('input', (e) => {
       card.style.display = 'none';
     }
   });
+});
+
+document.getElementById('global-search').addEventListener('search', (e) => {
+    // Si l'utilisateur clique sur la croix, l'événement "search" est tiré, on relance la logique de filtrage
+    e.target.dispatchEvent(new Event('input'));
 });
 
 // ---- SUPPRESSION HOST ----

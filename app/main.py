@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -58,8 +58,18 @@ def api_vm_detail(vm_id: int, db: Session = Depends(get_db)):
     vm = db.get(models.VM, vm_id)
     return vm
 
+@app.delete("/api/hosts/{host_id}")
+def delete_host(host_id: int, db: Session = Depends(get_db)):
+    host = db.execute(select(models.Host).where(models.Host.id == host_id)).scalar_one_or_none()
+    if not host:
+        raise HTTPException(status_code=404, detail="Host introuvable")
+    db.delete(host)
+    db.commit()
+    return {"status": "ok"}
+
 @app.post("/api/refresh")
-async def api_refresh():
+async def refresh_data():
+    # On force la collecte et on ATTEND la fin avant de répondre au front-end
     await collect_once()
     return {"status": "ok"}
 

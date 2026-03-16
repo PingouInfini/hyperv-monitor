@@ -28,7 +28,11 @@ def upsert_vm(db: Session, host_id: int, name: str, ip: str | None, guest_hostna
     if vm is None:
         vm = models.VM(host_id=host_id, name=name)
         db.add(vm)
-    vm.ip = ip
+
+    # Ne met à jour l'IP que si on en a détecté une nouvelle
+    if ip is not None:
+        vm.ip = ip
+
     vm.guest_hostname = guest_hostname
     vm.ram_mb = ram_mb
     vm.total_vhd_gb = total_vhd_gb

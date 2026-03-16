@@ -44,6 +44,7 @@ class HyperVClient:
         # PowerShell script minifié SANS accents pour éviter les erreurs d'encodage WinRM
         ps = r'''
 $ProgressPreference='SilentlyContinue'
+$ErrorActionPreference='SilentlyContinue'
 $hostName=(Get-ComputerInfo -Property CsName).CsName
 $hostIP=(Get-NetIPAddress -AddressFamily IPv4|?{$_.IPAddress -notlike '169.*' -and $_.IPAddress -notlike '127.*'}|Select -First 1 -ExpandProperty IPAddress)
 $cpu=Get-CimInstance Win32_Processor|Measure -Property LoadPercentage -Average
