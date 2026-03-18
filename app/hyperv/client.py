@@ -60,33 +60,33 @@ $vms=Get-VM|%{
  $ip=$null
  try{$adp=Get-VMNetworkAdapter -VMName $safeName;$ip=$adp.IPAddresses|?{$_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.*'}|Select -First 1}catch{}
  
- $rawHost=$null;$rawFqdn=$null;$vmDns=@()
+ $kvpHash=@{}
  try{
-  $kvp=Get-VMIntegrationService -VMName $safeName|?{$_.Name -match 'Key-Value|change de paires'}
-  if($kvp -and $kvp.Enabled){
-   $items=Get-VMKeyValuePair -VMName $safeName -Source Guest
-   $rawHost=($items|?{$_.Name -eq "HostName"}).Value
-   $rawFqdn=($items|?{$_.Name -eq "FullyQualifiedDomainName"}).Value
-   $vmDns=($items|?{$_.Name -eq "NameServer"}).Value -split ','
+  $kvpService=Get-VMIntegrationService -VMName $safeName|?{$_.Name -match 'Key-Value|change de paires'}
+  if($kvpService -and $kvpService.Enabled){
+   Get-VMKeyValuePair -VMName $safeName -Source Guest|%{ $kvpHash[$_.Name]=$_.Value }
   }
  }catch{}
  
- # Reverse DNS uniquement si on n'a absolument rien eu via KVP
- if(-not $rawHost -and -not $rawFqdn -and $ip){try{$rawFqdn=[System.Net.Dns]::GetHostEntry($ip).HostName}catch{}}
+ $rawHost=$kvpHash['HostName']
+ $rawFqdn=$kvpHash['FullyQualifiedDomainName']
+ $vmDns=if($kvpHash['NameServer']){$kvpHash['NameServer'] -split ','}else{@()}
  
- $vmHost=$null;$vmFqdn=$null
- # Logique de séparation stricte Hostname court / FQDN
- if($rawFqdn){
+ $vmHost=if($rawHost){$rawHost.Split('.')[0]}else{$safeName}
+ $trueDomain=$null
+ 
+ if($vm.State -eq 'Running'){
+  try{$trueDomain=Invoke-Command -VMName $safeName -ScriptBlock {(Get-CimInstance Win32_ComputerSystem).Domain} -ErrorAction Stop}catch{}
+ }
+ 
+ $vmFqdn=$null
+ if($trueDomain -and $trueDomain -notmatch 'WORKGROUP|^\s*$'){
+  $vmFqdn="$vmHost.$trueDomain"
+ }elseif($rawFqdn -match '\.'){
   $vmFqdn=$rawFqdn
   $vmHost=$rawFqdn.Split('.')[0]
- }elseif($rawHost){
-  if($rawHost -match '\.'){
-   $vmFqdn=$rawHost
-   $vmHost=$rawHost.Split('.')[0]
-  }else{
-   $vmHost=$rawHost
-   $vmFqdn=$rawHost
-  }
+ }else{
+  $vmFqdn=$vmHost
  }
  
  $vhdInfo=@()
@@ -99,7 +99,3 @@ $vms=Get-VM|%{
 [pscustomobject]@{host_name=$hostName;host_ip=$hostIP;host_cpu_pct=$cpuUsage;host_free_mem_mb=$freeMemMB;host_total_mem_mb=$totalMemMB;host_free_disk_gb=$freeDiskGB;host_total_disk_gb=$totalDiskGB;vms=$vms}|ConvertTo-Json -Depth 6
 '''
         return self._run_ps_json(ps)
-
-def demo_parse():
-    # Helper for unit tests; not used in production path
-    pass
