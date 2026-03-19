@@ -54,17 +54,17 @@ $totalMemMB=[int]($os.TotalVisibleMemorySize/1024)
 $fixed=Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"|Select DeviceID,FreeSpace,Size
 $freeDiskGB=[math]::Round((($fixed|Measure -Property FreeSpace -Sum).Sum)/1GB,2)
 $totalDiskGB=[math]::Round((($fixed|Measure -Property Size -Sum).Sum)/1GB,2)
+
 $vms=Get-VM|%{
  $vm=$_
- $safeName=$vm.Name -replace '\[','*' -replace '\]','*'
  $ip=$null
- try{$adp=Get-VMNetworkAdapter -VMName $safeName;$ip=$adp.IPAddresses|?{$_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.*'}|Select -First 1}catch{}
+ try{$adp=$vm|Get-VMNetworkAdapter;$ip=$adp.IPAddresses|?{$_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.*'}|Select -First 1}catch{}
  
  $kvpHash=@{}
  try{
-  $kvpService=Get-VMIntegrationService -VMName $safeName|?{$_.Name -match 'Key-Value|change de paires'}
+  $kvpService=$vm|Get-VMIntegrationService|?{$_.Name -match 'Key-Value|change de paires'}
   if($kvpService -and $kvpService.Enabled){
-   Get-VMKeyValuePair -VMName $safeName -Source Guest|%{ $kvpHash[$_.Name]=$_.Value }
+   $vm|Get-VMKeyValuePair -Source Guest|%{ $kvpHash[$_.Name]=$_.Value }
   }
  }catch{}
  
@@ -72,11 +72,14 @@ $vms=Get-VM|%{
  $rawFqdn=$kvpHash['FullyQualifiedDomainName']
  $vmDns=if($kvpHash['NameServer']){$kvpHash['NameServer'] -split ','}else{@()}
  
- $vmHost=if($rawHost){$rawHost.Split('.')[0]}else{$safeName}
+ $vmHost=if($rawHost){$rawHost.Split('.')[0]}else{$vm.Name}
  $trueDomain=$null
  
  if($vm.State -eq 'Running'){
-  try{$trueDomain=Invoke-Command -VMName $safeName -ScriptBlock {(Get-CimInstance Win32_ComputerSystem).Domain} -ErrorAction Stop}catch{}
+  try{
+   $trueDomain=Invoke-Command -VMId $vm.Id -ScriptBlock {(Get-CimInstance Win32_ComputerSystem).Domain} -ErrorAction Stop
+   if($trueDomain){ $trueDomain=([string]$trueDomain).Trim() }
+  }catch{}
  }
  
  $vmFqdn=$null
@@ -90,7 +93,7 @@ $vms=Get-VM|%{
  }
  
  $vhdInfo=@()
- try{$vhdInfo=Get-VMHardDiskDrive -VMName $safeName|%{ $vhd=Get-VHD -Path $_.Path;[pscustomobject]@{Path=$vhd.Path;Size=[int64]$vhd.Size;FileSize=[int64]$vhd.FileSize}}}catch{}
+ try{$vhdInfo=$vm|Get-VMHardDiskDrive|%{ $vhd=Get-VHD -Path $_.Path;[pscustomobject]@{Path=$vhd.Path;Size=[int64]$vhd.Size;FileSize=[int64]$vhd.FileSize}}}catch{}
  $totVhd=if($vhdInfo){[math]::Round((($vhdInfo|Measure -Property Size -Sum).Sum)/1GB,2)}else{$null}
  $totVhdFile=if($vhdInfo){[math]::Round((($vhdInfo|Measure -Property FileSize -Sum).Sum)/1GB,2)}else{$null}
  

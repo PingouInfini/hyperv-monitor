@@ -179,7 +179,7 @@ async function loadHosts() {
     card.dataset.hostName = h.name.toLowerCase();
 
     card.innerHTML = `
-      <button class="btn-trash" onclick="openDeleteModal(${h.id}, '${h.ip || h.name}')" title="Supprimer l'hôte">
+      <button class="btn-trash" data-host-id="${h.id}" data-host-target="${h.ip || h.name}" title="Supprimer l'hôte">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
       </button>
       <div class="host-header">
@@ -221,7 +221,7 @@ document.getElementById('global-search').addEventListener('input', (e) => {
 
   // 1. Filtrer le tableau DataTables (Onglet VMs)
   if (window._dt) {
-    window._dt.search(val).draw();
+    window._dt.search(val, false, false).draw();
   }
 
   // 2. Filtrer les cartes (Onglet Hosts)
@@ -258,17 +258,29 @@ document.getElementById('global-search').addEventListener('search', (e) => {
 });
 
 // ---- SUPPRESSION HOST ----
+document.addEventListener('click', (e) => {
+  const trashBtn = e.target.closest('.btn-trash');
+  if (trashBtn) {
+    openDeleteModal(trashBtn.dataset.hostId, trashBtn.dataset.hostTarget);
+  }
+});
+
 function openDeleteModal(hostId, hostIpOrName) {
   document.getElementById('delete-host-id').value = hostId;
   document.getElementById('delete-target-ip').value = hostIpOrName;
   document.getElementById('delete-target-ip-display').textContent = hostIpOrName;
   document.getElementById('delete-confirm-input').value = '';
   document.getElementById('confirm-delete-btn').disabled = true;
-  document.getElementById('delete-modal').setAttribute('open', '');
+
+  const modal = document.getElementById('delete-modal');
+  if (modal.showModal) modal.showModal(); // API Native (gère le premier plan et le fond grisé)
+  else modal.setAttribute('open', '');
 }
 
 function closeModal() {
-  document.getElementById('delete-modal').removeAttribute('open');
+  const modal = document.getElementById('delete-modal');
+  if (modal.close) modal.close();
+  else modal.removeAttribute('open');
 }
 
 document.getElementById('delete-confirm-input').addEventListener('input', (e) => {

@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from .db import Base, engine, SessionLocal
 from . import models, schemas
@@ -63,6 +63,9 @@ def delete_host(host_id: int, db: Session = Depends(get_db)):
     host = db.execute(select(models.Host).where(models.Host.id == host_id)).scalar_one_or_none()
     if not host:
         raise HTTPException(status_code=404, detail="Host introuvable")
+
+    # Suppression en cascade : on supprime les VMs d'abord pour éviter l'erreur d'intégrité SQL
+    db.execute(delete(models.VM).where(models.VM.host_id == host_id))
     db.delete(host)
     db.commit()
     return {"status": "ok"}
