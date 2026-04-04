@@ -162,20 +162,44 @@ table.dataTable.order-column.stripe > tbody > tr > .sorting_1 {
   border-radius: 4px;
 }
 
+/* ---- TAGS & FILTRES ---- */
 .host-tags {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     flex-wrap: wrap;
-    margin-top: 8px;
+    margin-top: 10px;
 }
 
 .tag-badge {
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 0.7rem;
-    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     white-space: nowrap;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    opacity: 1;
+}
+
+.tag-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+    filter: brightness(1.2);
+}
+
+/* État actif quand un tag est cliqué */
+.tag-badge.active {
+    outline: 2px solid var(--text-main);
+    outline-offset: 2px;
+}
+
+/* Diminue l'opacité des tags non-actifs si un filtre global est en cours */
+.hosts-grid.filtering-tags .tag-badge:not(.active) {
+    opacity: 0.4;
+    filter: grayscale(0.5);
 }

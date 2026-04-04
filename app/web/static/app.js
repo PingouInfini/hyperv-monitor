@@ -1,3 +1,7 @@
+// ---- ETAT GLOBAL ----
+window.tagColors = {};
+window.activeTags = new Set(); // Stocke les tags cliqués pour le filtrage
+
 // ---- NAVIGATION ----
 document.addEventListener('click', (e) => {
   const t = e.target;
@@ -8,8 +12,8 @@ document.addEventListener('click', (e) => {
     document.getElementById(t.dataset.target).classList.add('active');
     t.classList.add('active');
 
-    // Au changement d'onglet, on relance la recherche courante pour appliquer le filtre au bon endroit
-    document.getElementById('global-search').dispatchEvent(new Event('input'));
+    // Au changement d'onglet, on réapplique les filtres
+    applyFilters();
   }
 });
 
@@ -26,14 +30,8 @@ function fmtDate(s) {
   // On s'assure que la date est interprétée comme de l'UTC
   // Si Python renvoie "2026-04-01T10:00:00" sans fuseau, on ajoute le 'Z'
   let dateString = s;
-  if (!dateString.endsWith('Z') && !dateString.includes('+')) {
-    dateString += 'Z';
-  }
-
-  const d = new Date(dateString);
-
-  // On force l'affichage à l'heure de Paris
-  return d.toLocaleTimeString('fr-FR', {
+  if (!dateString.endsWith('Z') && !dateString.includes('+')) dateString += 'Z';
+  return new Date(dateString).toLocaleTimeString('fr-FR', {
     timeZone: 'Europe/Paris',
     hour: '2-digit',
     minute: '2-digit'
@@ -54,7 +52,7 @@ window.focusVM = function(vmName) {
   // 2. Remplir la barre de recherche globale pour isoler la VM
   const search = document.getElementById('global-search');
   search.value = vmName;
-  search.dispatchEvent(new Event('input')); // Déclenche la recherche
+  applyFilters();
 
   // 3. Appliquer la surbrillance sur la ligne du tableau
   setTimeout(() => {
@@ -74,7 +72,7 @@ window.focusHost = function(hostName) {
   // 2. Vider la barre de recherche pour être sûr de voir l'hôte
   const search = document.getElementById('global-search');
   search.value = '';
-  search.dispatchEvent(new Event('input'));
+  applyFilters();
 
   // 3. Scroller vers la carte et la mettre en surbrillance
   setTimeout(() => {
@@ -87,83 +85,79 @@ window.focusHost = function(hostName) {
   }, 100);
 };
 
-// ---- LOAD VMS (Style Dozzle) ----
-window.tagColors = {};
-
+// ---- LOAD VMS (Anti-Blink) ----
 async function loadVMs() {
-  const data = await fetchJSON('/api/vms');
-  const tbody = document.getElementById('vms-body');
-  tbody.innerHTML = '';
+  // On fetch TOUT en parallèle avant de toucher au DOM
+  const [data, hosts] = await Promise.all([
+    fetchJSON('/api/vms'),
+    fetchJSON('/api/hosts')
+  ]);
 
-  data.forEach(vm => {
-    // Statut basé sur Hyper-V (Running = UP, sinon DOWN)
-    const isUp = vm.state === 'Running';
-    const statusHtml = `<span class="status-dot ${isUp ? 'up' : 'down'}" title="${vm.state}"></span>`;
-
-    let displayIp = '<span class="text-muted">—</span>';
-    const validIp = vm.ip && vm.ip !== '{}' && vm.ip !== 'null';
-
-    if (validIp) {
-        displayIp = isUp ? vm.ip : `<i class="text-muted">${vm.ip}</i>`;
-    }
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${statusHtml} &nbsp; ${vm.name}</td>
-      <td>${vm.guest_hostname || '<span class="text-muted">—</span>'}</td>
-      <td>${displayIp}</td>
-      <td>${vm.fqdn || '<span class="text-muted">—</span>'}</td>
-      <td>${vm.ram_mb ? vm.ram_mb : '—'}</td>
-      <td>${vm.total_vhd_gb ? vm.total_vhd_gb : '—'}</td>
-      <td>${vm.total_vhd_file_gb ? vm.total_vhd_file_gb : '—'}</td>
-      <td class="host-name" data-host-id="${vm.host_id}"></td>
-      <td class="text-muted">${fmtDate(vm.last_seen)}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  const hosts = await fetchJSON('/api/hosts');
   const hostMap = {};
   hosts.forEach(h => hostMap[h.id] = h.name);
-  document.querySelectorAll('#vms-body .host-name').forEach(td => {
-    const hid = parseInt(td.dataset.hostId, 10);
-    const hName = hostMap[hid] || hid;
-    // On rend le nom cliquable
-    td.innerHTML = `<span class="link-text" onclick="focusHost('${hName}')" title="Voir la carte de cet hôte">${hName}</span>`;
-  });
 
+  // Construction du HTML en mémoire
+  const trsHtml = data.map(vm => {
+    const isUp = vm.state === 'Running';
+    const statusHtml = `<span class="status-dot ${isUp ? 'up' : 'down'}" title="${vm.state}"></span>`;
+    const validIp = vm.ip && vm.ip !== '{}' && vm.ip !== 'null';
+    const displayIp = validIp ? (isUp ? vm.ip : `<i class="text-muted">${vm.ip}</i>`) : '<span class="text-muted">—</span>';
+    const hName = hostMap[vm.host_id] || vm.host_id;
+
+    return `
+      <tr>
+        <td>${statusHtml} &nbsp; ${vm.name}</td>
+        <td>${vm.guest_hostname || '<span class="text-muted">—</span>'}</td>
+        <td>${displayIp}</td>
+        <td>${vm.fqdn || '<span class="text-muted">—</span>'}</td>
+        <td>${vm.ram_mb ? vm.ram_mb : '—'}</td>
+        <td>${vm.total_vhd_gb ? vm.total_vhd_gb : '—'}</td>
+        <td>${vm.total_vhd_file_gb ? vm.total_vhd_file_gb : '—'}</td>
+        <td><span class="link-text" onclick="focusHost('${hName}')" title="Voir la carte de cet hôte">${hName}</span></td>
+        <td class="text-muted">${fmtDate(vm.last_seen)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // Remplacement synchronisé du DOM
+  const tbody = document.getElementById('vms-body');
   if (window._dt) window._dt.destroy();
-  // Utilisation de "dom" pour masquer "l" (length/afficher) et "f" (filter/recherche)
+  tbody.innerHTML = trsHtml;
+
   window._dt = new DataTable('#vms-table', {
     responsive: true,
     pageLength: 100,
     dom: 't<"dt-bottom"ip>',
     language: { info: "_START_ à _END_ sur _TOTAL_ VMs", infoEmpty: "Aucune VM" }
   });
+
+  // Si on est dans l'onglet VM au rafraichissement, appliquer la recherche DataTables
+  applyFilters();
 }
 
-// ---- LOAD HOSTS (Style Beszel) ----
+// ---- LOAD HOSTS (Anti-Blink) ----
 async function loadHosts() {
   const hosts = await fetchJSON('/api/hosts');
-  const grid = document.getElementById('hosts-grid');
-  grid.innerHTML = '';
 
-  for (const h of hosts) {
-    const detail = await fetchJSON('/api/hosts/' + h.id);
+  // Fetcher tous les détails en parallèle pour éviter le clignotement de la grille
+  const detailsPromises = hosts.map(h => fetchJSON('/api/hosts/' + h.id));
+  const detailsData = await Promise.all(detailsPromises);
+
+  const fragment = document.createDocumentFragment();
+
+  hosts.forEach((h, index) => {
+    const detail = detailsData[index];
     const vms = detail.vms || [];
-
-    // Tri : Allumées d'abord
     vms.sort((a, b) => (b.state === 'Running' ? 1 : 0) - (a.state === 'Running' ? 1 : 0));
 
     const vmsHtml = vms.map(vm => {
       const isUp = vm.state === 'Running';
       const validIp = vm.ip && vm.ip !== '{}' && vm.ip !== 'null';
-
       let displayIp = validIp ? vm.ip : vm.state;
       if (!isUp && validIp) displayIp = `<i>${vm.ip}</i>`;
 
       return `
-        <div class="vm-row clickable" data-vm-name="${vm.name.toLowerCase()}" data-vm-ip="${validIp ? vm.ip.toLowerCase() : ''}" onclick="focusVM('${vm.name}')" title="Chercher cette VM dans le tableau">
+        <div class="vm-row clickable" data-vm-name="${vm.name.toLowerCase()}" data-vm-ip="${validIp ? vm.ip.toLowerCase() : ''}" onclick="focusVM('${vm.name}')">
           <div class="vm-info">
             <span class="status-dot ${isUp ? 'up' : 'down'}"></span>
             <span class="vm-name">${vm.name}</span>
@@ -177,16 +171,14 @@ async function loadHosts() {
     if (h.tags && h.tags.length > 0) {
       tagsHtml = '<div class="host-tags">';
       h.tags.forEach(t => {
-        // Fallback si le tag n'est pas défini dans le .env
         const colorDef = window.tagColors[t] || { bg: '#334155', text: '#f8fafc' };
-        tagsHtml += `<span class="tag-badge" style="background-color: ${colorDef.bg}; color: ${colorDef.text};">${t}</span>`;
+        // On ajoute data-tag pour le ciblage JS
+        tagsHtml += `<span class="tag-badge" data-tag="${t}" style="background-color: ${colorDef.bg}; color: ${colorDef.text};">${t}</span>`;
       });
       tagsHtml += '</div>';
     }
 
-    // Calculs pourcentages
     const cpuPct = h.cpu_usage_pct || 0;
-
     let memPct = 0; let memStr = 'N/A';
     if (h.total_mem_mb && h.free_mem_mb) {
       const usedMem = h.total_mem_mb - h.free_mem_mb;
@@ -215,54 +207,62 @@ async function loadHosts() {
           ${tagsHtml} <div class="host-meta">${h.ip || 'IP Inconnue'} • Vu: ${fmtDate(h.last_seen)}</div>
         </div>
       </div>
-
       <div class="stats-grid">
-        <div class="stat-item">
-          <div class="stat-header"><span>CPU</span></div>
-          <div class="stat-header"><span class="stat-val">${cpuPct}%</span></div>
-          <div class="progress-bg"><div class="progress-fill ${getProgressColor(cpuPct)}" style="width: ${cpuPct}%"></div></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-header"><span>RAM</span></div>
-          <div class="stat-header"><span class="stat-val">${memStr}</span></div>
-          <div class="progress-bg"><div class="progress-fill ${getProgressColor(memPct)}" style="width: ${memPct}%"></div></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-header"><span>DISK</span></div>
-          <div class="stat-header"><span class="stat-val">${diskStr}</span></div>
-          <div class="progress-bg"><div class="progress-fill ${getProgressColor(diskPct)}" style="width: ${diskPct}%"></div></div>
-        </div>
+        <div class="stat-item"><div class="stat-header"><span>CPU</span></div><div class="stat-header"><span class="stat-val">${cpuPct}%</span></div><div class="progress-bg"><div class="progress-fill ${getProgressColor(cpuPct)}" style="width: ${cpuPct}%"></div></div></div>
+        <div class="stat-item"><div class="stat-header"><span>RAM</span></div><div class="stat-header"><span class="stat-val">${memStr}</span></div><div class="progress-bg"><div class="progress-fill ${getProgressColor(memPct)}" style="width: ${memPct}%"></div></div></div>
+        <div class="stat-item"><div class="stat-header"><span>DISK</span></div><div class="stat-header"><span class="stat-val">${diskStr}</span></div><div class="progress-bg"><div class="progress-fill ${getProgressColor(diskPct)}" style="width: ${diskPct}%"></div></div></div>
       </div>
-
       <div class="vm-list">
         ${vmsHtml || '<div class="vm-row" style="justify-content: center; color: var(--text-muted);">Aucune VM</div>'}
       </div>
     `;
-    grid.appendChild(card);
-  }
+    fragment.appendChild(card);
+  });
+
+  const grid = document.getElementById('hosts-grid');
+  // Échange instantané = zéro blink
+  grid.innerHTML = '';
+  grid.appendChild(fragment);
+
+  // Une fois les cartes chargées, on réapplique les filtres et les tags actifs
+  applyFilters();
 }
 
-// ---- RECHERCHE UNIFIÉE ----
-document.getElementById('global-search').addEventListener('input', (e) => {
-  const val = e.target.value.toLowerCase();
+// ---- LOGIQUE DE FILTRAGE UNIFIÉE (Recherche + Tags) ----
+function applyFilters() {
+  const val = document.getElementById('global-search').value.toLowerCase();
+  const grid = document.getElementById('hosts-grid');
+  const hasTagFilters = window.activeTags.size > 0;
 
-  // 1. Filtrer le tableau DataTables (Onglet VMs)
+  // 1. Appliquer une classe globale pour styliser les tags inactifs si un filtre est actif
+  if (hasTagFilters) grid.classList.add('filtering-tags');
+  else grid.classList.remove('filtering-tags');
+
+  // 2. DataTables (Onglet VMs) - La recherche textuelle s'applique toujours
   if (window._dt) {
     window._dt.search(val, false, false).draw();
   }
 
-  // 2. Filtrer les cartes (Onglet Hosts)
+  // 3. Cartes (Onglet Hosts)
   document.querySelectorAll('.host-card').forEach(card => {
     const hostName = card.dataset.hostName;
-    const hostMatch = hostName.includes(val);
+    const hostMatchSearch = hostName.includes(val);
     let hasVisibleVm = false;
 
-    card.querySelectorAll('.vm-row').forEach(row => {
-      const vmName = row.dataset.vmName || "";
-      const vmIp = row.dataset.vmIp || "";
+    // Vérification des tags de la carte
+    const cardTags = Array.from(card.querySelectorAll('.tag-badge')).map(t => t.dataset.tag);
+    // L'hôte doit posséder TOUS les tags sélectionnés (intersection)
+    let hostMatchTags = true;
+    if (hasTagFilters) {
+      hostMatchTags = Array.from(window.activeTags).every(t => cardTags.includes(t));
+    }
 
-      // La condition vérifie maintenant le nom OU l'IP de la VM
-      if (vmName.includes(val) || vmIp.includes(val) || hostMatch) {
+    // Gestion de la recherche textuelle sur les VMs
+    card.querySelectorAll('.vm-row').forEach(row => {
+      const vmName = (row.dataset.vmName || "").toLowerCase();
+      const vmIp = (row.dataset.vmIp || "").toLowerCase();
+
+      if (vmName.includes(val) || vmIp.includes(val) || hostMatchSearch) {
         row.style.display = '';
         hasVisibleVm = true;
       } else {
@@ -270,18 +270,42 @@ document.getElementById('global-search').addEventListener('input', (e) => {
       }
     });
 
-    // On affiche la carte si l'hôte matche OU si au moins une de ses VM matche
-    if (hostMatch || hasVisibleVm) {
+    // Affichage de la carte : valide les tags ET (valide la recherche ou contient une VM cherchée)
+    if (hostMatchTags && (hostMatchSearch || hasVisibleVm)) {
       card.style.display = '';
     } else {
       card.style.display = 'none';
     }
-  });
-});
 
-document.getElementById('global-search').addEventListener('search', (e) => {
-    // Si l'utilisateur clique sur la croix, l'événement "search" est tiré, on relance la logique de filtrage
-    e.target.dispatchEvent(new Event('input'));
+    // Mise à jour visuelle des tags dans cette carte
+    card.querySelectorAll('.tag-badge').forEach(badge => {
+      if (window.activeTags.has(badge.dataset.tag)) {
+        badge.classList.add('active');
+      } else {
+        badge.classList.remove('active');
+      }
+    });
+  });
+}
+
+// Events listener pour le champ de recherche
+document.getElementById('global-search').addEventListener('input', applyFilters);
+document.getElementById('global-search').addEventListener('search', applyFilters);
+
+// Event listener (Délégation) pour les clics sur les tags
+document.addEventListener('click', (e) => {
+  const badge = e.target.closest('.tag-badge');
+  if (badge) {
+    const tag = badge.dataset.tag;
+    // Ajoute ou supprime le tag du Set global
+    if (window.activeTags.has(tag)) {
+      window.activeTags.delete(tag);
+    } else {
+      window.activeTags.add(tag);
+    }
+    // Relance le calcul des affichages
+    applyFilters();
+  }
 });
 
 // ---- SUPPRESSION HOST ----
@@ -300,7 +324,7 @@ function openDeleteModal(hostId, hostIpOrName) {
   document.getElementById('confirm-delete-btn').disabled = true;
 
   const modal = document.getElementById('delete-modal');
-  if (modal.showModal) modal.showModal(); // API Native (gère le premier plan et le fond grisé)
+  if (modal.showModal) modal.showModal();
   else modal.setAttribute('open', '');
 }
 
@@ -320,44 +344,30 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async ()
   try {
     await fetch(`/api/hosts/${hostId}`, { method: 'DELETE' });
     closeModal();
-    // On retire visuellement la carte immédiatement
-    await loadHosts();
-    await loadVMs();
+    await Promise.all([loadHosts(), loadVMs()]);
   } catch (e) {
     console.error("Erreur de suppression", e);
   }
 });
 
-// ---- ACTUALISATION ----
+// ---- ACTUALISATION MANUELLE ----
 document.getElementById('refresh-btn').addEventListener('click', async (e) => {
   const btn = e.target;
   btn.setAttribute('aria-busy', 'true');
   btn.textContent = 'Actualisation...';
   try { await fetch('/api/refresh', { method: 'POST' }); } catch (e) {}
   await Promise.all([loadVMs(), loadHosts()]);
-  // Réappliquer la recherche si le champ n'est pas vide
-  document.getElementById('global-search').dispatchEvent(new Event('input'));
   btn.removeAttribute('aria-busy');
   btn.textContent = '↻ Actualiser';
 });
 
+// ---- INITIALISATION ----
 window.addEventListener('load', async () => {
-  // On récupère les couleurs des tags au chargement
-  try {
-    window.tagColors = await fetchJSON('/api/config/tags');
-  } catch(e) {
-    console.warn("Impossible de charger les couleurs des tags", e);
-  }
+  try { window.tagColors = await fetchJSON('/api/config/tags'); } catch(e) {}
   await Promise.all([loadVMs(), loadHosts()]);
 
-  // Auto-actualisation silencieuse ----
-  // Rafraîchit l'IHM toutes les 60 secondes (60000 millisecondes)
+  // Actualisation silencieuse sans flash (Grâce aux Promise.all + Fragment DOM)
   setInterval(async () => {
-    // On recharge les données en fond
     await Promise.all([loadVMs(), loadHosts()]);
-
-    // On relance l'événement de recherche pour réappliquer le filtre
-    // au cas où l'utilisateur était en train de chercher quelque chose
-    document.getElementById('global-search').dispatchEvent(new Event('input'));
   }, 60000);
 });
