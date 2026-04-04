@@ -26,9 +26,6 @@ async function fetchJSON(url) {
 
 function fmtDate(s) {
   if (!s) return 'Jamais';
-
-  // On s'assure que la date est interprétée comme de l'UTC
-  // Si Python renvoie "2026-04-01T10:00:00" sans fuseau, on ajoute le 'Z'
   let dateString = s;
   if (!dateString.endsWith('Z') && !dateString.includes('+')) dateString += 'Z';
   return new Date(dateString).toLocaleTimeString('fr-FR', {
@@ -46,17 +43,15 @@ function getProgressColor(pct) {
 
 // ---- NAVIGATION CROISÉE (FOCUS) ----
 window.focusVM = function(vmName) {
-  // 1. Basculer sur l'onglet VMs
   document.getElementById('tab-vms').click();
-
-  // 2. Remplir la barre de recherche globale pour isoler la VM
   const search = document.getElementById('global-search');
+  const clearBtn = document.getElementById('clear-search-btn');
+
   search.value = vmName;
+  clearBtn.style.display = 'flex'; // Affiche la croix car le champ n'est plus vide
   applyFilters();
 
-  // 3. Appliquer la surbrillance sur la ligne du tableau
   setTimeout(() => {
-    // DataTables réécrit le DOM, on prend la première ligne du corps
     const tr = document.querySelector('#vms-body tr');
     if (tr && !tr.querySelector('.dataTables_empty')) {
       tr.classList.add('highlight-target');
@@ -66,15 +61,14 @@ window.focusVM = function(vmName) {
 };
 
 window.focusHost = function(hostName) {
-  // 1. Basculer sur l'onglet Hosts
   document.getElementById('tab-hosts').click();
-
-  // 2. Vider la barre de recherche pour être sûr de voir l'hôte
   const search = document.getElementById('global-search');
+  const clearBtn = document.getElementById('clear-search-btn');
+
   search.value = '';
+  clearBtn.style.display = 'none';
   applyFilters();
 
-  // 3. Scroller vers la carte et la mettre en surbrillance
   setTimeout(() => {
     const card = document.querySelector(`.host-card[data-host-name="${hostName.toLowerCase()}"]`);
     if (card) {
@@ -87,7 +81,6 @@ window.focusHost = function(hostName) {
 
 // ---- LOAD VMS (Anti-Blink) ----
 async function loadVMs() {
-  // On fetch TOUT en parallèle avant de toucher au DOM
   const [data, hosts] = await Promise.all([
     fetchJSON('/api/vms'),
     fetchJSON('/api/hosts')
@@ -96,7 +89,6 @@ async function loadVMs() {
   const hostMap = {};
   hosts.forEach(h => hostMap[h.id] = h.name);
 
-  // Construction du HTML en mémoire
   const trsHtml = data.map(vm => {
     const isUp = vm.state === 'Running';
     const statusHtml = `<span class="status-dot ${isUp ? 'up' : 'down'}" title="${vm.state}"></span>`;
@@ -119,7 +111,6 @@ async function loadVMs() {
     `;
   }).join('');
 
-  // Remplacement synchronisé du DOM
   const tbody = document.getElementById('vms-body');
   if (window._dt) window._dt.destroy();
   tbody.innerHTML = trsHtml;
@@ -131,15 +122,12 @@ async function loadVMs() {
     language: { info: "_START_ à _END_ sur _TOTAL_ VMs", infoEmpty: "Aucune VM" }
   });
 
-  // Si on est dans l'onglet VM au rafraichissement, appliquer la recherche DataTables
   applyFilters();
 }
 
 // ---- LOAD HOSTS (Anti-Blink) ----
 async function loadHosts() {
   const hosts = await fetchJSON('/api/hosts');
-
-  // Fetcher tous les détails en parallèle pour éviter le clignotement de la grille
   const detailsPromises = hosts.map(h => fetchJSON('/api/hosts/' + h.id));
   const detailsData = await Promise.all(detailsPromises);
 
@@ -172,7 +160,6 @@ async function loadHosts() {
       tagsHtml = '<div class="host-tags">';
       h.tags.forEach(t => {
         const colorDef = window.tagColors[t] || { bg: '#334155', text: '#f8fafc' };
-        // On ajoute data-tag pour le ciblage JS
         tagsHtml += `<span class="tag-badge" data-tag="${t}" style="background-color: ${colorDef.bg}; color: ${colorDef.text};">${t}</span>`;
       });
       tagsHtml += '</div>';
@@ -220,11 +207,9 @@ async function loadHosts() {
   });
 
   const grid = document.getElementById('hosts-grid');
-  // Échange instantané = zéro blink
   grid.innerHTML = '';
   grid.appendChild(fragment);
 
-  // Une fois les cartes chargées, on réapplique les filtres et les tags actifs
   applyFilters();
 }
 
@@ -234,30 +219,24 @@ function applyFilters() {
   const grid = document.getElementById('hosts-grid');
   const hasTagFilters = window.activeTags.size > 0;
 
-  // 1. Appliquer une classe globale pour styliser les tags inactifs si un filtre est actif
   if (hasTagFilters) grid.classList.add('filtering-tags');
   else grid.classList.remove('filtering-tags');
 
-  // 2. DataTables (Onglet VMs) - La recherche textuelle s'applique toujours
   if (window._dt) {
     window._dt.search(val, false, false).draw();
   }
 
-  // 3. Cartes (Onglet Hosts)
   document.querySelectorAll('.host-card').forEach(card => {
     const hostName = card.dataset.hostName;
     const hostMatchSearch = hostName.includes(val);
     let hasVisibleVm = false;
 
-    // Vérification des tags de la carte
     const cardTags = Array.from(card.querySelectorAll('.tag-badge')).map(t => t.dataset.tag);
-    // L'hôte doit posséder TOUS les tags sélectionnés (intersection)
     let hostMatchTags = true;
     if (hasTagFilters) {
       hostMatchTags = Array.from(window.activeTags).every(t => cardTags.includes(t));
     }
 
-    // Gestion de la recherche textuelle sur les VMs
     card.querySelectorAll('.vm-row').forEach(row => {
       const vmName = (row.dataset.vmName || "").toLowerCase();
       const vmIp = (row.dataset.vmIp || "").toLowerCase();
@@ -270,14 +249,12 @@ function applyFilters() {
       }
     });
 
-    // Affichage de la carte : valide les tags ET (valide la recherche ou contient une VM cherchée)
     if (hostMatchTags && (hostMatchSearch || hasVisibleVm)) {
       card.style.display = '';
     } else {
       card.style.display = 'none';
     }
 
-    // Mise à jour visuelle des tags dans cette carte
     card.querySelectorAll('.tag-badge').forEach(badge => {
       if (window.activeTags.has(badge.dataset.tag)) {
         badge.classList.add('active');
@@ -288,22 +265,38 @@ function applyFilters() {
   });
 }
 
-// Events listener pour le champ de recherche
-document.getElementById('global-search').addEventListener('input', applyFilters);
-document.getElementById('global-search').addEventListener('search', applyFilters);
+// ---- RECHERCHE UNIFIÉE & CROIX ----
+const searchInput = document.getElementById('global-search');
+const clearSearchBtn = document.getElementById('clear-search-btn');
 
-// Event listener (Délégation) pour les clics sur les tags
+searchInput.addEventListener('input', (e) => {
+  clearSearchBtn.style.display = e.target.value.length > 0 ? 'flex' : 'none';
+  applyFilters();
+});
+
+clearSearchBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  clearSearchBtn.style.display = 'none';
+  searchInput.focus();
+  applyFilters();
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    clearSearchBtn.click();
+  }
+});
+
+// ---- FILTRAGE PAR CLIC SUR TAG ----
 document.addEventListener('click', (e) => {
   const badge = e.target.closest('.tag-badge');
   if (badge) {
     const tag = badge.dataset.tag;
-    // Ajoute ou supprime le tag du Set global
     if (window.activeTags.has(tag)) {
       window.activeTags.delete(tag);
     } else {
       window.activeTags.add(tag);
     }
-    // Relance le calcul des affichages
     applyFilters();
   }
 });
@@ -352,13 +345,25 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async ()
 
 // ---- ACTUALISATION MANUELLE ----
 document.getElementById('refresh-btn').addEventListener('click', async (e) => {
-  const btn = e.target;
-  btn.setAttribute('aria-busy', 'true');
-  btn.textContent = 'Actualisation...';
-  try { await fetch('/api/refresh', { method: 'POST' }); } catch (e) {}
+  const btn = e.currentTarget;
+  const icon = btn.querySelector('.refresh-icon');
+  const text = btn.querySelector('span');
+
+  btn.disabled = true;
+  icon.classList.add('spin');
+  text.textContent = 'Actualisation...';
+
+  try {
+    await fetch('/api/refresh', { method: 'POST' });
+  } catch (err) {
+    console.error("Erreur lors de l'actualisation", err);
+  }
+
   await Promise.all([loadVMs(), loadHosts()]);
-  btn.removeAttribute('aria-busy');
-  btn.textContent = '↻ Actualiser';
+
+  btn.disabled = false;
+  icon.classList.remove('spin');
+  text.textContent = 'Actualiser';
 });
 
 // ---- INITIALISATION ----
@@ -366,7 +371,6 @@ window.addEventListener('load', async () => {
   try { window.tagColors = await fetchJSON('/api/config/tags'); } catch(e) {}
   await Promise.all([loadVMs(), loadHosts()]);
 
-  // Actualisation silencieuse sans flash (Grâce aux Promise.all + Fragment DOM)
   setInterval(async () => {
     await Promise.all([loadVMs(), loadHosts()]);
   }, 60000);
